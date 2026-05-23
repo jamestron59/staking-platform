@@ -1,0 +1,21 @@
+{
+  "name": "staking-platform",
+  "version": "1.0.0",
+  "scripts": {
+    "compile":          "hardhat compile",
+    "test":             "hardhat test",
+    "deploy:testnet":   "hardhat run scripts/deploy.js --network bscTestnet",
+    "deploy:mainnet":   "hardhat run scripts/deploy.js --network bscMainnet",
+    "verify":           "hardhat verify --network bscMainnet",
+    "backend":          "cd backend && npm start",
+    "frontend":         "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.19.0",
+    "dotenv": "^16.3.1"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.9.3"
+  }
+}
