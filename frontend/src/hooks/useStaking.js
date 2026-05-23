@@ -17,7 +17,7 @@ export function useWallet() {
 
   const connect = useCallback(async () => {
     if (!window.ethereum) {
-      toast.error("MetaMask nu este instalat!");
+      toast.error("MetaMask is not installed!");
       return;
     }
     setLoading(true);
@@ -32,9 +32,9 @@ export function useWallet() {
       setSigner(_signer);
       setAccount(_account);
       setChainId(Number(network.chainId));
-      toast.success("Wallet conectat!");
+      toast.success("Wallet connected!");
     } catch (err) {
-      toast.error(err.message || "Conectare eșuată");
+      toast.error(err.message || "Connection failed");
     } finally {
       setLoading(false);
     }
@@ -130,12 +130,12 @@ export function useStaking(signer, account) {
     try {
       const { token } = getContracts(signer);
       const tx = await token.approve(STAKING_ADDRESS, amount);
-      toast.loading("Aprobare în curs...", { id: "approve" });
+      toast.loading("Approving...", { id: "approve" });
       await tx.wait();
-      toast.success("Aprobat!", { id: "approve" });
+      toast.success("Approved!", { id: "approve" });
       await refresh();
     } catch (err) {
-      toast.error(err.reason || err.message || "Aprobare eșuată", { id: "approve" });
+      toast.error(err.reason || err.message || "Approval failed", { id: "approve" });
     } finally {
       setTxLoading(false);
     }
@@ -146,12 +146,12 @@ export function useStaking(signer, account) {
     try {
       const { staking } = getContracts(signer);
       const tx = await staking.stake(amount);
-      toast.loading("Staking în curs...", { id: "stake" });
+      toast.loading("Staking...", { id: "stake" });
       await tx.wait();
-      toast.success("Tokens staked cu succes! 🎉", { id: "stake" });
+      toast.success("Tokens staked successfully! 🎉", { id: "stake" });
       await refresh();
     } catch (err) {
-      toast.error(err.reason || err.message || "Staking eșuat", { id: "stake" });
+      toast.error(err.reason || err.message || "Staking failed", { id: "stake" });
     } finally {
       setTxLoading(false);
     }
@@ -162,9 +162,9 @@ export function useStaking(signer, account) {
     try {
       const { staking } = getContracts(signer);
       const tx = await staking.requestUnlock();
-      toast.loading("Cerere unlock...", { id: "unlock" });
+      toast.loading("Requesting unlock...", { id: "unlock" });
       await tx.wait();
-      toast.success("Unlock cerut! 7 zile countdown pornit ⏳", { id: "unlock" });
+      toast.success("Unlock requested! 7-day countdown started ⏳", { id: "unlock" });
       await refresh();
     } catch (err) {
       toast.error(err.reason || err.message || "Eroare", { id: "unlock" });
@@ -178,12 +178,12 @@ export function useStaking(signer, account) {
     try {
       const { staking } = getContracts(signer);
       const tx = await staking.unstake();
-      toast.loading("Unstake în curs...", { id: "unstake" });
+      toast.loading("Unstaking...", { id: "unstake" });
       await tx.wait();
-      toast.success("Tokens retrași cu succes! 💰", { id: "unstake" });
+      toast.success("Tokens withdrawn successfully! 💰", { id: "unstake" });
       await refresh();
     } catch (err) {
-      toast.error(err.reason || err.message || "Unstake eșuat", { id: "unstake" });
+      toast.error(err.reason || err.message || "Unstake failed", { id: "unstake" });
     } finally {
       setTxLoading(false);
     }
@@ -194,12 +194,12 @@ export function useStaking(signer, account) {
     try {
       const { staking } = getContracts(signer);
       const tx = await staking.claimRewards();
-      toast.loading("Colectare recompense...", { id: "claim" });
+      toast.loading("Claiming rewards...", { id: "claim" });
       await tx.wait();
-      toast.success("Recompense colectate! 🏆", { id: "claim" });
+      toast.success("Rewards claimed! 🏆", { id: "claim" });
       await refresh();
     } catch (err) {
-      toast.error(err.reason || err.message || "Claim eșuat", { id: "claim" });
+      toast.error(err.reason || err.message || "Claim failed", { id: "claim" });
     } finally {
       setTxLoading(false);
     }

@@ -1,14 +1,13 @@
 import React from "react";
-import { ethers } from "ethers";
 import { formatAmount } from "../utils/contracts";
 
 export default function StatsPanel({ stats }) {
   if (!stats) return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
       {[...Array(4)].map((_, i) => (
-        <div key={i} className="card p-4 animate-pulse">
-          <div className="h-4 bg-indigo-900 rounded w-1/2 mb-2" />
-          <div className="h-6 bg-indigo-800 rounded w-3/4" />
+        <div key={i} className="stat-card animate-pulse">
+          <div className="h-3 rounded w-1/2 mb-3" style={{ background: "rgba(245,200,66,0.1)" }} />
+          <div className="h-7 rounded w-3/4" style={{ background: "rgba(245,200,66,0.15)" }} />
         </div>
       ))}
     </div>
@@ -17,39 +16,22 @@ export default function StatsPanel({ stats }) {
   const { tvl, stakers, rewardsPaid, rewardPool, apy, decimals } = stats;
 
   const items = [
-    {
-      label: "APY Curent",
-      value: `${apy}%`,
-      sub:   apy >= 50 ? "🔥 Bonus luna 1" : "Standard",
-      color: "text-green-400",
-    },
-    {
-      label: "Total Staked (TVL)",
-      value: formatAmount(tvl, decimals, 2),
-      sub:   "tokens",
-      color: "text-indigo-300",
-    },
-    {
-      label: "Stakers",
-      value: stakers.toString(),
-      sub:   "utilizatori activi",
-      color: "text-purple-400",
-    },
-    {
-      label: "Pool Recompense",
-      value: formatAmount(rewardPool, decimals, 2),
-      sub:   "tokens disponibili",
-      color: "text-yellow-400",
-    },
+    { label: "Current APY", value: `${apy}%`, sub: apy >= 50 ? "🔥 Month 1 Bonus" : "Standard", icon: "📈" },
+    { label: "Total Value Locked", value: formatAmount(tvl, decimals, 2), sub: "tokens staked", icon: "🔒" },
+    { label: "Active Stakers", value: stakers.toString(), sub: "wallets", icon: "👥" },
+    { label: "Reward Pool", value: formatAmount(rewardPool, decimals, 2), sub: "tokens available", icon: "💰" },
   ];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
       {items.map((item) => (
-        <div key={item.label} className="card p-5">
-          <p className="text-slate-400 text-sm mb-1">{item.label}</p>
-          <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
-          <p className="text-slate-500 text-xs mt-1">{item.sub}</p>
+        <div key={item.label} className="stat-card">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">{item.icon}</span>
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">{item.label}</p>
+          </div>
+          <p className="text-2xl font-bold mb-1 gradient-text">{item.value}</p>
+          <p className="text-slate-500 text-xs">{item.sub}</p>
         </div>
       ))}
     </div>
