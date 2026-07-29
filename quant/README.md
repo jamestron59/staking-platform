@@ -174,6 +174,35 @@ Verify whether the agent approval expires and needs renewing — check HL's
 current docs; the gateway will start failing to sign if it lapses, which the
 reject-rate kill switch surfaces immediately.
 
+### If something else already trades this account
+
+Two HL operations this bot uses are **account-wide, not per-process**:
+
+- `scheduleCancel` — the dead man's switch — cancels *every* resting order on
+  the account;
+- the startup orphan cleanup cancels every order it cannot attribute.
+
+So a second bot on the same HL account is not a co-tenant, it is a casualty:
+this one would delete the other's orders every 20 seconds and again on every
+restart. Position accounting breaks too — the reconciler sees positions it did
+not open, calls them phantoms, and trips the kill switch.
+
+`account.exclusive_account: false` makes it safe but not good:
+
+| | `true` (default) | `false` |
+|---|---|---|
+| Dead man's switch | armed | **disabled** — a crash leaves orders resting |
+| Startup orphans | cancelled | **halts**, touches nothing |
+| `cancel_all` scope | whole account | only our own cloids |
+
+Read the middle row carefully: with the switch disabled, a process that dies
+leaves live orders on a real account until you cancel them by hand.
+
+**The correct fix is a second funded wallet.** A separate HL account for this
+bot gives it exclusive ownership *and* restores the account-level exposure
+boundary that a subaccount would have provided — solving both problems at once,
+for the price of one transfer. Put $100 there and leave the other bot alone.
+
 ### What $100 actually buys
 
 `hlq preflight` on the shipped profile reports:

@@ -62,10 +62,17 @@ class ReconcileResult:
 
 
 class Reconciler:
-    def __init__(self, store: StateStore, kill: KillSwitch, *, size_tolerance: float = 1e-8) -> None:
+    def __init__(
+        self, store: StateStore, kill: KillSwitch, *,
+        size_tolerance: float = 1e-8, exclusive_account: bool = True,
+    ) -> None:
         self.store = store
         self.kill = kill
         self.size_tolerance = size_tolerance
+        # When false, this bot shares the HL account with something else, so
+        # anything it cannot attribute belongs to that other process and must
+        # never be cancelled or adopted.
+        self.exclusive_account = exclusive_account
         self._local_positions: dict[str, Position] = {}
 
     def set_local(self, positions: dict[str, Position]) -> None:
@@ -163,6 +170,24 @@ class Reconciler:
         """
         if not result.fatal:
             return True
+
+        if startup and not self.exclusive_account:
+            # Shared account: unattributable orders are the other process's.
+            # Cancelling them would be this bot reaching into another system's
+            # state, and adopting them would mean managing positions whose
+            # entry reason we do not know. Neither is acceptable, so stop.
+            log.error(
+                "startup_halt_shared_account",
+                reason=(
+                    "found orders on this account that this bot did not place. "
+                    "exclusive_account is false, so they belong to another process "
+                    "and will not be touched. Refusing to trade alongside it: give "
+                    "this bot its own funded wallet, or stop the other process."
+                ),
+                orders=[d.detail for d in result.divergences if d.severity == "fatal"],
+            )
+            return False
+
         if startup:
             log.warn("startup_orphans_cancelling", count=len(result.divergences))
             await gateway.cancel_all()

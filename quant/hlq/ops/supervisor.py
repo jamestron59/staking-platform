@@ -119,7 +119,10 @@ class Supervisor:
             log.warn("killswitch_restored_tripped", events=restored.get("events"))
 
         snapshot = await self.gateway.account()
-        reconciler = Reconciler(self.store, self.kill)
+        reconciler = Reconciler(
+            self.store, self.kill,
+            exclusive_account=self.cfg.account.exclusive_account,
+        )
         reconciler.set_local(self._positions)
         result = reconciler.reconcile(snapshot, startup=True)
         if not await reconciler.adopt_or_abort(result, self.gateway, startup=True):
@@ -399,9 +402,20 @@ class Supervisor:
             except Exception:
                 log.exception("housekeeping_failed")
 
+    def _cancel_scope(self) -> Optional[set[str]]:
+        """Which orders we are allowed to cancel.
+
+        None means "everything on the account", which is only safe when we own
+        it. On a shared account we restrict cancellation to cloids we minted,
+        so we never reach into another process's orders.
+        """
+        if self.cfg.account.exclusive_account:
+            return None
+        return set(self.store.orders)
+
     async def _flatten_all(self) -> None:
         log.warn("flattening_all_positions", reason="killswitch")
-        await self.gateway.cancel_all()
+        await self.gateway.cancel_all(cloids=self._cancel_scope())
         for coin in list(self._open):
             book = self._books.get(coin)
             if book:
@@ -411,7 +425,7 @@ class Supervisor:
         self._running = False
         log.event("supervisor_stopping", positions=len(self._positions))
         try:
-            await self.gateway.cancel_all()
+            await self.gateway.cancel_all(cloids=self._cancel_scope())
         except Exception:
             log.exception("shutdown_cancel_failed")
         self.store.save_killswitch(self.kill.status())

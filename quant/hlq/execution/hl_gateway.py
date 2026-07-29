@@ -221,9 +221,24 @@ class HyperliquidGateway:
             log.warn("cancel_failed", cloid=cloid, error=str(exc))
             return False
 
-    async def cancel_all(self, coin: Optional[str] = None) -> int:
+    async def cancel_all(
+        self, coin: Optional[str] = None, cloids: Optional[set[str]] = None
+    ) -> int:
+        """Cancel resting orders. `cloids` restricts it to orders we placed.
+
+        Without that restriction this is an account-wide operation. On a shared
+        account it deletes whatever else is trading there, which is why the
+        supervisor passes our own cloids whenever `exclusive_account` is false.
+        """
         orders = await asyncio.to_thread(self._info.open_orders, self.address)
-        targets = [o for o in orders if coin is None or o["coin"] == coin]
+        targets = [
+            o for o in orders
+            if (coin is None or o["coin"] == coin)
+            and (cloids is None or o.get("cloid") in cloids)
+        ]
+        skipped = len(orders) - len(targets)
+        if cloids is not None and skipped:
+            log.event("cancel_all_skipped_foreign_orders", skipped=skipped)
         n = 0
         for o in targets:
             try:
@@ -300,6 +315,10 @@ class HyperliquidGateway:
     # ---- dead man's switch ------------------------------------------------
 
     async def refresh_dead_man_switch(self) -> None:
+        if not self.cfg.account.exclusive_account:
+            # scheduleCancel is account-wide. On a shared account it would
+            # delete the other process's resting orders on every trigger.
+            return
         day = time.strftime("%Y-%m-%d", time.gmtime())
         if day != self._dms_day:
             self._dms_day, self._dms_triggers_today = day, 0
@@ -316,6 +335,19 @@ class HyperliquidGateway:
             log.warn("dead_man_switch_refresh_failed", error=str(exc))
 
     async def start_dead_man_switch(self) -> None:
+        if not self.cfg.account.exclusive_account:
+            log.warn(
+                "dead_man_switch_disabled_shared_account",
+                reason=(
+                    "scheduleCancel cancels every resting order on the account, "
+                    "including those placed by whatever else trades it. Running "
+                    "without the switch means a crash leaves our orders alive "
+                    "until cancelled by hand — cancel them manually if this "
+                    "process dies unexpectedly."
+                ),
+            )
+            return
+
         async def loop() -> None:
             while not self._closed:
                 await self.refresh_dead_man_switch()
@@ -332,6 +364,8 @@ class HyperliquidGateway:
         self._closed = True
         if self._dms_task:
             self._dms_task.cancel()
+        if not self.cfg.account.exclusive_account:
+            return  # we never armed it, so there is nothing to clear
         try:
             # Clear the scheduled cancel so a clean shutdown does not leave a
             # timer that fires against a later, manually placed order.

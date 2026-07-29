@@ -171,6 +171,22 @@ def preflight(cfg: Config, *, min_notional_usd: float = 10.0) -> PreflightReport
             "your risk capital in the HL account and the rest off-exchange.",
         )
 
+    if cfg.account.exclusive_account:
+        rep.add(
+            "ok", "account_exclusivity",
+            "declared sole owner of this HL account: the dead man's switch and "
+            "startup cleanup are enabled",
+        )
+    else:
+        rep.add(
+            "warn", "account_exclusivity",
+            "shared account: the dead man's switch is DISABLED (scheduleCancel is "
+            "account-wide and would delete the other process's orders). A crash "
+            "will leave resting orders alive until cancelled by hand. Two bots on "
+            "one account is a bad arrangement regardless — give each its own "
+            "funded wallet.",
+        )
+
     if cfg.account.require_agent_wallet:
         rep.add("ok", "key_scope", "agent wallet required: the signing key cannot withdraw")
     else:

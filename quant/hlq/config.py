@@ -71,6 +71,23 @@ class AccountConfig:
     # Setting this to true is an acknowledgement that you have done so.
     no_subaccount_acknowledged: bool = False
 
+    # Does this bot own the HL account outright, or does something else trade
+    # it too (another bot, a manual position, a copy-trading vault)?
+    #
+    # This is not a preference. Two HL operations are ACCOUNT-WIDE, not
+    # per-process:
+    #   - `scheduleCancel` (the dead man's switch) cancels EVERY resting order
+    #     on the account, not just ours;
+    #   - the startup orphan cleanup cancels every order it cannot attribute.
+    # With exclusive_account=true and a second process trading, this bot
+    # silently deletes the other one's orders every 20 seconds.
+    #
+    # Set to false when anything else touches the account. The cost is real:
+    # the dead man's switch is disabled, so a crash leaves resting orders alive
+    # until you cancel them. Running two bots on one account is a bad trade
+    # either way — a second funded wallet is the correct fix.
+    exclusive_account: bool = True
+
     def load_secret(self) -> str:
         key = os.environ.get(self.private_key_env, "").strip()
         if not key:

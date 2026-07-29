@@ -82,7 +82,12 @@ class PaperGateway:
     async def cancel(self, cloid: str, coin: str) -> bool:
         return self.engine.cancel(cloid, int(time.time() * 1000))
 
-    async def cancel_all(self, coin: Optional[str] = None) -> int:
+    async def cancel_all(
+        self, coin: Optional[str] = None, cloids: Optional[set[str]] = None
+    ) -> int:
+        # The simulated book only ever contains our own orders, so the cloid
+        # restriction is a no-op here. The signature matches the live gateway
+        # so the supervisor cannot behave differently between the two.
         return self.engine.cancel_all(int(time.time() * 1000))
 
     async def query_by_cloid(self, cloid: str) -> Optional[Order]:

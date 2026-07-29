@@ -183,6 +183,57 @@ def test_our_own_orders_are_not_flagged(tmp_path, kill):
     assert not r.reconcile(snap, startup=False).fatal
 
 
+class _CancelSpy:
+    """Records what a shutdown or cleanup path tried to cancel."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    async def cancel_all(self, coin=None, cloids=None):
+        self.calls.append((coin, cloids))
+        return 0
+
+
+def test_shared_account_never_cancels_foreign_orders(tmp_path, kill):
+    """Regression: HL's scheduleCancel and a blind cancel_all are ACCOUNT-WIDE.
+
+    On an account shared with another process, cancelling everything we cannot
+    attribute deletes that process's orders. The startup path must halt instead.
+    """
+    import asyncio
+
+    r = Reconciler(StateStore(tmp_path), kill, exclusive_account=False)
+    r.set_local({})
+    foreign = Order(cloid="", coin="BTC", side=Side.BUY, sz=1.0,
+                    limit_px=50_000.0, tif=TimeInForce.GTC, oid=77)
+    snap = AccountSnapshot(equity_usd=1000.0, open_orders=[foreign], at_ms=1000)
+
+    result = r.reconcile(snap, startup=True)
+    assert result.fatal
+
+    spy = _CancelSpy()
+    ok = asyncio.run(r.adopt_or_abort(result, spy, startup=True))
+    assert not ok, "started trading alongside an unidentified process"
+    assert spy.calls == [], "cancelled orders belonging to another process"
+
+
+def test_exclusive_account_still_cleans_up_its_own_orphans(tmp_path, kill):
+    """The normal case must keep working: a bot that owns the account and finds
+    stale orders after a wiped state directory clears them and continues."""
+    import asyncio
+
+    r = Reconciler(StateStore(tmp_path), kill, exclusive_account=True)
+    r.set_local({})
+    orphan = Order(cloid="", coin="BTC", side=Side.BUY, sz=1.0,
+                   limit_px=50_000.0, tif=TimeInForce.GTC, oid=77)
+    snap = AccountSnapshot(equity_usd=1000.0, open_orders=[orphan], at_ms=1000)
+
+    result = r.reconcile(snap, startup=True)
+    spy = _CancelSpy()
+    assert asyncio.run(r.adopt_or_abort(result, spy, startup=True))
+    assert spy.calls, "exclusive owner failed to clear its own stale orders"
+
+
 def test_exchange_truth_is_adopted(tmp_path, kill):
     r = Reconciler(StateStore(tmp_path), kill)
     r.set_local({"BTC": Position(coin="BTC", size=0.4, entry_px=50_000.0)})
