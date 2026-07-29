@@ -1,0 +1,113 @@
+# Hyperliquid trading stack — configuration.
+#
+# Copy to config/config.yaml and edit. Unknown keys are a hard error at boot:
+# a typo must not silently fall back to a default.
+#
+# Progression: record -> backtest -> paper -> live.
+# Do not skip to live because the code "looks right". The plumbing is what
+# breaks, and it breaks in ways only contact with the exchange reveals.
+
+mode: record            # record | backtest | paper | live
+
+network:
+  testnet: false
+
+account:
+  # For a subaccount setup, this is the SUBACCOUNT address — the one holding
+  # the funds this bot is allowed to touch.
+  account_address: "0x0000000000000000000000000000000000000000"
+  # HL routes subaccount actions through the vaultAddress field. Set this to
+  # the subaccount address when trading a subaccount; leave empty for the main
+  # account. Verify with `info.query_sub_accounts(master_address)`.
+  subaccount_address: ""
+  # Name of the env var holding the key. The key itself is never in this file.
+  # Use an approved agent (API) wallet: it can trade but cannot withdraw, so a
+  # compromised host loses open positions, not the balance.
+  private_key_env: "HL_API_SECRET"
+  require_agent_wallet: true
+
+data:
+  coins: ["BTC", "ETH"]
+  candle_intervals: ["1m", "5m", "15m", "1h"]
+  subscribe_book: true
+  subscribe_trades: true
+  subscribe_asset_ctx: true
+  subscribe_bbo: false          # much higher rate; enable once storage is proven
+  root: "data"
+  rotate_minutes: 60
+  max_staleness_ms: 5000        # beyond this the bot is blind and stops trading
+  ws_ping_interval_s: 20
+  ws_reconnect_max_backoff_s: 60
+
+costs:
+  # SET THESE FROM YOUR ACTUAL FEE TIER. Check with info.user_fees(address).
+  # Understating fees is the most common way a backtest turns a losing
+  # strategy into a winning one.
+  taker_fee_bps: 4.5
+  maker_fee_bps: 1.5            # negative if you earn a rebate
+  # Calibrate from your own fills — `hlq status` reports the measured value
+  # once enough have accumulated. The default is a guess about your latency.
+  residual_slippage_bps: 1.0
+  funding_interval_hours: 1.0
+
+risk:
+  equity_usd: 500.0             # the subaccount balance, not your net worth
+  risk_per_trade_pct: 0.5
+  max_portfolio_risk_pct: 1.5
+  assumed_correlation: 0.8      # crypto perps move together; 0.8 is realism
+  max_position_notional_usd: 100.0
+  max_gross_notional_usd: 200.0
+  max_leverage: 2.0
+  max_concurrent_positions: 1   # raise only after the plumbing is proven
+
+  max_daily_loss_pct: 2.0
+  max_drawdown_pct: 5.0
+  max_consecutive_losses: 4
+  max_reject_rate: 0.25
+  reject_window: 20
+  min_liquidation_buffer_mult: 3.0
+
+  # The gate that matters most: a signal must beat its own cost, not just
+  # clear a confidence threshold.
+  min_edge_after_costs_bps: 2.0
+  max_spread_bps: 3.0
+  min_depth_usd_at_10bps: 25000.0
+
+execution:
+  prefer_maker: true
+  maker_timeout_ms: 3000
+  max_requotes: 3
+  max_participation_of_depth: 0.10
+  slice_interval_ms: 750
+  max_slices: 5
+  ioc_slippage_bps: 5.0
+  # Dead man's switch: HL cancels all resting orders if we stop refreshing.
+  # Max 10 triggers per UTC day, minimum 5s lead time.
+  dead_man_switch_s: 60
+  dead_man_refresh_s: 20
+  action_expiry_ms: 10000
+  reconcile_interval_s: 15
+  order_timeout_ms: 8000
+
+model:
+  horizon_ms: 300000            # 5 minutes
+  profit_take_atr_mult: 1.5
+  stop_atr_mult: 1.0
+  embargo_pct: 0.01
+  n_splits: 6
+  min_train_samples: 5000
+  min_oos_sharpe: 1.0
+  max_calibration_brier: 0.24
+  min_challenger_improvement: 0.15
+  shadow_period_hours: 72
+
+alerts:
+  enabled: false
+  telegram_bot_token_env: "TELEGRAM_BOT_TOKEN"
+  telegram_chat_id_env: "TELEGRAM_CHAT_ID"
+
+log_dir: "logs"
+state_dir: "state"
+
+# mode: live is refused unless this is true. Deliberate friction.
+i_understand_this_trades_real_money: false
