@@ -1,0 +1,90 @@
+# Install or update hlq on the trading server.
+#
+# Deliberately NOT triggered by push. Auto-deploying to a box that holds
+# positions on every commit is how an untested change reaches real money at
+# 3am. Every run is a conscious act.
+#
+# This workflow never starts the trader. It installs, validates, and stops.
+# Starting anything that spends money is a separate, explicit decision made
+# through hlq-control.
+
+name: hlq deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run the test suite on the server before installing
+        required: false
+        default: true
+        type: boolean
+      restart_recorder:
+        description: >-
+          Restart the recorder after installing. Safe — the recorder never
+          authenticates and holds no key. Leave off to install without
+          interrupting an in-flight capture.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hlq-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, hl-trader]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show what is about to change
+        run: |
+          echo "commit: ${{ github.sha }}"
+          echo "branch: ${{ github.ref_name }}"
+          git --no-pager log -1 --format='%h %an %s'
+
+      - name: Run tests
+        if: ${{ inputs.run_tests }}
+        working-directory: quant
+        run: |
+          python3 -m venv /tmp/hlq-test-venv
+          /tmp/hlq-test-venv/bin/pip install --quiet -r requirements.txt
+          /tmp/hlq-test-venv/bin/python -m pytest tests/ -q
+
+      - name: Install
+        working-directory: quant
+        # Needs root: creates a service user, writes to /opt, /etc and
+        # /etc/systemd/system. Note honestly that because the runner user can
+        # edit this checkout, sudo rights over it are root-equivalent — see
+        # quant/deploy/RUNNER.md. The containment boundary is the agent wallet,
+        # not the sudoers file.
+        run: sudo bash deploy/install.sh
+
+      - name: Preflight
+        # Reports whether the configuration can actually place an order at this
+        # account size, and what the risk numbers really imply. Fails the run
+        # on a blocking finding rather than leaving it in the log.
+        run: |
+          sudo -u hlq /opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml preflight
+
+      - name: Restart recorder
+        if: ${{ inputs.restart_recorder }}
+        run: |
+          sudo /usr/bin/systemctl restart hlq-recorder
+          sleep 5
+          sudo /usr/bin/systemctl is-active hlq-recorder
+
+      - name: Health check
+        # Non-fatal: a freshly installed box with no data yet is legitimately
+        # "degraded". The log is the point.
+        run: sudo /usr/local/bin/hlq-healthcheck || true
+
+      - name: Service status
+        run: |
+          systemctl status hlq-recorder --no-pager -l | head -20 || true
+          systemctl status hlq-trader --no-pager -l | head -20 || true

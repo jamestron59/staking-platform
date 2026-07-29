@@ -1,0 +1,56 @@
+# Read-only inspection of the trading server.
+#
+# Runs deploy/inventory.sh on the self-hosted runner and surfaces the result in
+# the Actions log, which is how this repository's collaborators (and Claude)
+# can see the server's state without SSH access.
+#
+# Changes nothing. Starts nothing. Stops nothing.
+
+name: hlq inventory
+
+on:
+  workflow_dispatch:
+    inputs:
+      hl_address:
+        description: >-
+          Hyperliquid address to report on (public on-chain data, no key needed).
+          Leave empty to skip the account section.
+        required: false
+        type: string
+
+# Read-only: the job needs nothing beyond checking out the code.
+permissions:
+  contents: read
+
+# Never run two inspections at once on the same box.
+concurrency:
+  group: hlq-server
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    # Label set when registering the runner. Targeting a label rather than
+    # "self-hosted" alone means adding a second server later cannot
+    # accidentally receive this job.
+    runs-on: [self-hosted, hl-trader]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect inventory
+        # The script redacts hex strings and key/secret/token patterns from
+        # process command lines, reports credential files by permission only,
+        # and never reads their contents. Its output is meant to be safe to
+        # read in a log — but Actions logs are visible to anyone with repo
+        # access, so keep this repository private.
+        run: |
+          chmod +x quant/deploy/inventory.sh
+          bash quant/deploy/inventory.sh "${{ inputs.hl_address }}" | tee /tmp/hlq-inventory.txt
+
+      - name: Upload inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: hlq-inventory-${{ github.run_id }}
+          path: /tmp/hlq-inventory.txt
+          retention-days: 7

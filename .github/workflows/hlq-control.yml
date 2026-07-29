@@ -1,0 +1,115 @@
+# Start and stop the trading services.
+#
+# Separated from deploy on purpose: installing code and committing capital are
+# different decisions and should not share a button.
+#
+# `start-trader` is the only action here that spends money. It requires typing
+# the word "trade" as confirmation — the same speed bump the CLI enforces
+# interactively, preserved for the path where a service manager does the
+# starting.
+
+name: hlq control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        required: true
+        type: choice
+        options:
+          - status
+          - start-recorder
+          - stop-recorder
+          - stop-trader
+          - cancel-all-orders
+          - start-trader
+      confirm:
+        description: >-
+          Type "trade" to allow start-trader. Ignored for every other action.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hlq-server
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: [self-hosted, hl-trader]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Status
+        if: ${{ inputs.action == 'status' }}
+        run: |
+          systemctl status hlq-recorder --no-pager -l | head -25 || true
+          systemctl status hlq-trader --no-pager -l | head -25 || true
+          sudo -u hlq /opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml status || true
+          sudo /usr/local/bin/hlq-healthcheck || true
+
+      - name: Start recorder
+        if: ${{ inputs.action == 'start-recorder' }}
+        run: |
+          sudo /usr/bin/systemctl enable --now hlq-recorder
+          sleep 5
+          systemctl is-active hlq-recorder
+
+      - name: Stop recorder
+        if: ${{ inputs.action == 'stop-recorder' }}
+        # Every second stopped is data that cannot be re-collected.
+        run: sudo /usr/bin/systemctl stop hlq-recorder
+
+      - name: Stop trader
+        if: ${{ inputs.action == 'stop-trader' }}
+        # SIGINT via the unit's KillSignal, so the supervisor's shutdown path
+        # runs: cancel resting orders, persist kill-switch state, clear the
+        # scheduled cancel. Open POSITIONS are not closed by this — stopping
+        # the bot does not flatten the book.
+        run: |
+          sudo /usr/bin/systemctl stop hlq-trader
+          echo "Trader stopped. Resting orders cancelled by the shutdown path."
+          echo "NOTE: open positions are NOT closed by stopping the service."
+          sudo -u hlq /opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml status || true
+
+      - name: Cancel all orders
+        if: ${{ inputs.action == 'cancel-all-orders' }}
+        # The manual escape hatch for the case the dead man's switch is
+        # disabled (shared account) and the process died leaving orders live.
+        run: |
+          sudo -u hlq /opt/hlq/venv/bin/python - <<'PY'
+          import asyncio
+          from hlq.config import Config
+          from hlq.execution.hl_gateway import HyperliquidGateway
+          cfg = Config.load("/etc/hlq/config.yaml")
+          async def main():
+              gw = HyperliquidGateway(cfg)
+              n = await gw.cancel_all()
+              print(f"cancelled {n} order(s)")
+              await gw.close()
+          asyncio.run(main())
+          PY
+
+      - name: Refuse unconfirmed trader start
+        if: ${{ inputs.action == 'start-trader' && inputs.confirm != 'trade' }}
+        run: |
+          echo "start-trader requires confirm=trade. Nothing was started."
+          exit 1
+
+      - name: Start trader
+        if: ${{ inputs.action == 'start-trader' && inputs.confirm == 'trade' }}
+        run: |
+          # Preflight is a gate, not a formality: a config that cannot place a
+          # legal order produces a bot that runs for a week doing nothing while
+          # looking healthy.
+          sudo -u hlq /opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml preflight
+          sudo /usr/bin/systemctl enable --now hlq-trader
+          sleep 10
+          systemctl is-active hlq-trader
+          journalctl -u hlq-trader -n 40 --no-pager
