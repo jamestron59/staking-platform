@@ -1,6 +1,8 @@
 """Command line entry point. One subcommand per phase, in the order they must
 be run — the CLI is itself the runbook.
 
+    hlq latency   # what latency does this host actually have?
+    hlq preflight # is this config internally consistent at this account size?
     hlq record    # Phase 0: capture. Run this for weeks before anything else.
     hlq verify    # check the recording for gaps before trusting it
     hlq backtest  # Phase 1: does the idea survive costs?
@@ -190,6 +192,30 @@ def cmd_dataset(args) -> int:
     return 0
 
 
+def cmd_preflight(args) -> int:
+    from .ops.preflight import preflight
+
+    cfg = _load(args.config)
+    report = preflight(cfg)
+    print(json.dumps(report.as_dict(), indent=2))
+    if report.blocked:
+        print("\nBLOCKED: this configuration cannot trade as written.", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_latency(args) -> int:
+    from .ops import latency
+
+    cfg = _load(args.config)
+    report = asyncio.run(latency.run(
+        cfg.network.api_url, cfg.network.ws_url,
+        coin=cfg.data.coins[0], seconds=args.seconds,
+    ))
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def cmd_status(args) -> int:
     from .ops.state import StateStore
 
@@ -265,6 +291,14 @@ def main(argv: list[str] | None = None) -> int:
     ds = sub.add_parser("dataset", help="Phase 4: build a point-in-time dataset")
     ds.add_argument("--sample-interval", type=int, default=60, help="seconds between samples")
     ds.set_defaults(fn=cmd_dataset)
+
+    sub.add_parser(
+        "preflight", help="check the config is internally consistent before trading"
+    ).set_defaults(fn=cmd_preflight)
+
+    lat = sub.add_parser("latency", help="measure this host's latency to HL")
+    lat.add_argument("--seconds", type=int, default=60)
+    lat.set_defaults(fn=cmd_latency)
 
     sub.add_parser("status", help="current bot state").set_defaults(fn=cmd_status)
 

@@ -139,54 +139,116 @@ It then starts at 25% size. There is no path that skips this.
 
 ---
 
-## Going live on mainnet with a subaccount
+## Going live on mainnet — $100, no subaccount
 
-You are starting here rather than on testnet. That is a defensible choice —
-testnet liquidity is fictional, so testnet fills teach you little — provided
-the blast radius is genuinely bounded. Bound it like this:
+Use `config/config.live-100usd.yaml`. It is tuned for exactly this case and
+`hlq preflight` will print the arithmetic it implies.
 
-**1. Create a subaccount and fund it with what you can lose.**
+### Without a subaccount, one protection is gone
 
-The subaccount is the hard limit on this bot's exposure. Not a config value —
-an account boundary. Set `account.account_address` to the *subaccount* address.
+HL gates subaccount creation behind traded volume, so a new account cannot have
+one. That matters: a subaccount is an **account-level** bound on exposure —
+stronger than any config value, because the bot cannot raise it at runtime.
+Without it, the only bound is this config.
 
-**2. Use an agent (API) wallet, never your master key.**
+The substitute is manual and works: **keep only your risk capital in the HL
+account and the rest off-exchange.** That reconstitutes the boundary by hand.
+`account.no_subaccount_acknowledged: true` is how you state you have done it;
+live mode refuses to start otherwise.
 
-An approved agent wallet can trade but cannot withdraw. A compromised host then
-costs you open positions, not the balance. `HyperliquidGateway.verify_permissions()`
-refuses to start if the signing key equals the account address.
+### The agent wallet is now your main protection
+
+An approved agent (API) wallet can trade but **cannot withdraw**. With no
+subaccount boundary, this is what stands between a compromised VPS and your
+balance. `HyperliquidGateway.verify_permissions()` refuses to start if the
+signing key equals the account address.
 
 ```bash
-export HL_API_SECRET=0x...      # the agent wallet key, never the master key
+# Approve an agent wallet once, from a machine that is NOT the trading server:
+#   exchange.approve_agent()
+# Then put only the agent key on the server:
+HL_API_SECRET=0x...
 ```
 
-**3. Set `subaccount_address` in config.**
+Verify whether the agent approval expires and needs renewing — check HL's
+current docs; the gateway will start failing to sign if it lapses, which the
+reject-rate kill switch surfaces immediately.
 
-HL routes subaccount actions through the `vaultAddress` field, which the gateway
-passes to the SDK's `Exchange`. Confirm your subaccount address with
-`info.query_sub_accounts(master_address)` before the first run.
+### What $100 actually buys
 
-**4. Set your real fee tier.**
+`hlq preflight` on the shipped profile reports:
 
-```python
-Info(api_url).user_fees(address)
+```
+ok    min_notional     stops up to 5.0% stay above the minimum order size
+warn  effective_risk   for stops tighter than 1.25% the $40 position cap binds
+                       first, so actual risk is below the configured 0.5%
+ok    daily_stop       daily loss limit is $3.00, about 6 full-risk trades
+ok    cost_hurdle      a signal must predict at least 11.0bps to pass
+warn  sample_size      cannot distinguish edge from noise at this size
 ```
 
-Put the actual numbers in `costs:`. Understating fees is the single most common
-way a backtest turns a losing strategy into a winner.
+Read the last one carefully. At $0.50 of risk per trade you are buying
+**information about the plumbing**, not about the strategy. The right outcome
+of this phase is: no reconciler warnings for a week, realised fills close to
+expected, kill switches never firing spuriously. Profit or loss over 100 trades
+at this size is noise, and treating it as a verdict on the strategy is the
+mistake this whole codebase is built to prevent.
 
-**5. Start with these caps.**
+Set your real fee tier from `Info(api_url).user_fees(address)` before anything
+else — understating fees is the most common way a backtest turns a losing
+strategy into a winner.
 
-```yaml
-risk:
-  max_position_notional_usd: 100.0
-  max_gross_notional_usd: 200.0
-  max_concurrent_positions: 1
-  max_daily_loss_pct: 2.0
+---
+
+## Deploying to a VPS
+
+```bash
+git clone <repo> && cd quant
+sudo ./deploy/install.sh
 ```
 
-Raise them only after a week where the reconciler logged nothing and
-`hlq status` shows realised edge tracking expected edge.
+The installer creates an unprivileged `hlq` user, a virtualenv under
+`/opt/hlq`, config in `/etc/hlq`, and two systemd units. **It does not start
+the trader.** Starting a process that spends money is a separate, conscious act.
+
+```bash
+# 1. Recording is safe — read-only, needs no key at all.
+sudo systemctl enable --now hlq-recorder
+
+# 2. Measure what latency this host actually has.
+sudo -u hlq /opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml latency
+
+# 3. Weeks later: check the data has no holes.
+sudo -u hlq /opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml verify
+
+# 4. Only when ready to spend money.
+sudo systemctl enable --now hlq-trader
+```
+
+Operational notes that matter more than they look:
+
+- **Time sync is mandatory, not hygiene.** Both units `Requires=time-sync.target`.
+  A drifting clock produces recorded timestamps that are wrong in a way nothing
+  downstream detects, and the data is not re-collectable. The installer enables
+  NTP and `hlq latency` refuses to report a feed-lag number if it detects skew.
+- **Disk.** Full L2 capture runs roughly 0.5–1 GB per coin per day. One coin for
+  a month is ~30 GB. The installer warns below 40 GB free; the health check goes
+  critical below 5 GB, because a failing write loses data permanently.
+- **The recorder never gets the key.** Its unit has no `EnvironmentFile`. A
+  process with no use for a signing key should not have one.
+- **The trader stops restarting after 5 failures in 10 minutes.** If it cannot
+  stay up, a human should look — and by then the dead man's switch has already
+  cancelled every resting order.
+- **`KillSignal=SIGINT`** so the supervisor's shutdown path runs: cancel orders,
+  persist kill-switch state, clear the scheduled cancel.
+- **`hlq-healthcheck`** (installed to `/usr/local/bin`) checks the things that
+  fail silently — data actually arriving, disk, clock sync, kill-switch state,
+  unresolved orders. Wire it to cron or your monitoring. Exit 1 degraded, 2
+  critical.
+
+Latency from a European VPS to HL is fine for multi-minute holding periods and
+is not competitive with colocated market makers — which no VPS is. `hlq latency`
+gives you the number and tells you which of those two situations you are in.
 
 ### What is protecting you while it runs
 

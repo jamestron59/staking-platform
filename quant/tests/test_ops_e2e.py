@@ -203,8 +203,18 @@ def _write_cfg(tmp_path, **overrides) -> str:
 
     base = {
         "mode": "live",
-        "account": {"account_address": "0x" + "1" * 40},
-        "risk": {"max_position_notional_usd": 100.0, "max_gross_notional_usd": 200.0},
+        "account": {
+            "account_address": "0x" + "1" * 40,
+            # HL gates subaccount creation behind traded volume, so a new
+            # account runs on the main account and must acknowledge that.
+            "no_subaccount_acknowledged": True,
+        },
+        "risk": {
+            "equity_usd": 100.0,
+            "max_position_notional_usd": 40.0,
+            "max_gross_notional_usd": 60.0,
+            "max_leverage": 1.0,
+        },
         "i_understand_this_trades_real_money": True,
     }
     base.update(overrides)
@@ -223,6 +233,59 @@ def test_live_mode_requires_a_key_in_the_environment(tmp_path, monkeypatch):
     monkeypatch.delenv("HL_API_SECRET", raising=False)
     with pytest.raises(ConfigError, match="is empty"):
         Config.load(_write_cfg(tmp_path))
+
+
+def test_live_without_a_subaccount_must_be_acknowledged(tmp_path, monkeypatch):
+    """Running on the main account is legitimate when HL will not grant a
+    subaccount, but it removes the only account-level bound on exposure. That
+    must be a stated choice, not a default."""
+    monkeypatch.setenv("HL_API_SECRET", "0x" + "1" * 64)
+    path = _write_cfg(tmp_path, account={"account_address": "0x" + "1" * 40})
+    with pytest.raises(ConfigError, match="no subaccount configured"):
+        Config.load(path)
+
+
+def test_position_cap_above_equity_times_leverage_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("HL_API_SECRET", "0x" + "1" * 64)
+    path = _write_cfg(tmp_path, risk={
+        "equity_usd": 100.0, "max_position_notional_usd": 500.0,
+        "max_gross_notional_usd": 600.0, "max_leverage": 1.0,
+    })
+    with pytest.raises(ConfigError, match="exceeds equity x leverage"):
+        Config.load(path)
+
+
+def test_preflight_blocks_a_config_that_can_never_place_an_order():
+    """The silent failure this exists to prevent: at tiny equity the risk rule
+    produces orders below HL's minimum, so the bot runs forever without ever
+    trading and looks healthy the whole time."""
+    from hlq.ops.preflight import preflight
+
+    cfg = Config()
+    cfg.risk.equity_usd = 100.0
+    cfg.risk.risk_per_trade_pct = 0.01  # $0.01 per trade
+    report = preflight(cfg)
+    assert report.blocked
+    assert any(f.check == "min_notional_unreachable" for f in report.findings)
+
+
+def test_preflight_passes_the_shipped_100usd_profile():
+    cfg = Config()
+    cfg.risk.equity_usd = 100.0
+    cfg.risk.risk_per_trade_pct = 0.5
+    cfg.risk.max_position_notional_usd = 40.0
+    cfg.risk.max_gross_notional_usd = 60.0
+    cfg.risk.max_leverage = 1.0
+    cfg.risk.max_concurrent_positions = 1
+    cfg.risk.max_daily_loss_pct = 3.0
+
+    from hlq.ops.preflight import preflight
+
+    report = preflight(cfg)
+    assert not report.blocked, report.as_dict()
+    # The position cap binds before the risk rule at this size; that must be
+    # reported rather than left for the operator to discover from PnL.
+    assert any(f.check == "effective_risk" for f in report.findings)
 
 
 def test_unknown_config_key_is_an_error(tmp_path):

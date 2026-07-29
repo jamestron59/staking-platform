@@ -1,0 +1,13 @@
+/var/log/hlq/hlq.jsonl {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    # The process holds the file open, so truncate in place rather than
+    # renaming — a rename would leave it writing to a deleted inode and the
+    # logs would vanish while everything looked fine.
+    copytruncate
+    create 0640 hlq hlq
+}

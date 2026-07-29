@@ -1,0 +1,55 @@
+[Unit]
+Description=hlq trader (real money)
+Documentation=https://github.com/jamestron59/staking-platform
+After=network-online.target time-sync.target
+Wants=network-online.target
+Requires=time-sync.target
+
+[Service]
+Type=simple
+User=hlq
+Group=hlq
+WorkingDirectory=/opt/hlq
+
+# Contains HL_API_SECRET. Must be 0600 and owned by hlq — the installer
+# enforces this and refuses to proceed otherwise.
+EnvironmentFile=/etc/hlq/hlq.env
+Environment=PYTHONUNBUFFERED=1
+
+# --yes skips the interactive prompt, which cannot be answered by a service
+# manager. The prompt's job is done by the deliberate act of enabling this unit.
+ExecStart=/opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml live --yes
+
+# Restarting is safe: kill-switch state is persisted and restored, and startup
+# reconciles against the exchange before any strategy code runs. A tripped bot
+# comes back tripped.
+Restart=on-failure
+RestartSec=30
+
+# But NOT forever. Five failures in ten minutes means something structural is
+# wrong, and hammering HL's rate limits while a human is asleep makes it worse.
+# The dead man's switch has already cancelled resting orders by then.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+# SIGINT so the supervisor's shutdown path runs: cancel all orders, persist
+# kill-switch state, clear the scheduled cancel.
+KillSignal=SIGINT
+TimeoutStopSec=45
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/hlq /var/log/hlq
+
+[Install]
+WantedBy=multi-user.target

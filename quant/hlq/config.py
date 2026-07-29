@@ -62,6 +62,14 @@ class AccountConfig:
     # cannot withdraw, which caps the blast radius of a compromised host.
     private_key_env: str = "HL_API_SECRET"
     require_agent_wallet: bool = True
+    # A subaccount is an ACCOUNT-LEVEL bound on what this bot can ever touch —
+    # stronger than any config value, because the bot cannot raise it at
+    # runtime. HL gates subaccount creation behind traded volume, so a new
+    # account cannot have one. Running on the main account is therefore
+    # legitimate, but it removes that bound, and the substitute is to keep only
+    # the risk capital in the HL account and the rest off-exchange.
+    # Setting this to true is an acknowledgement that you have done so.
+    no_subaccount_acknowledged: bool = False
 
     def load_secret(self) -> str:
         key = os.environ.get(self.private_key_env, "").strip()
@@ -230,6 +238,21 @@ class Config:
                 raise ConfigError("mode=live requires account.account_address")
             if r.max_position_notional_usd <= 0 or r.max_gross_notional_usd <= 0:
                 raise ConfigError("mode=live requires non-zero hard notional caps")
+            if not self.account.subaccount_address and not self.account.no_subaccount_acknowledged:
+                raise ConfigError(
+                    "no subaccount configured. Without one, the bot's exposure is bounded "
+                    "only by its own config, not by an account boundary. Either set "
+                    "account.subaccount_address, or keep only your risk capital in the HL "
+                    "account and set account.no_subaccount_acknowledged: true"
+                )
+            # At small equity the risk-per-trade rule can produce orders below
+            # HL's minimum notional, which shows up as a bot that silently never
+            # trades. Surface it at boot instead.
+            if r.equity_usd > 0 and r.max_position_notional_usd > r.equity_usd * r.max_leverage:
+                raise ConfigError(
+                    f"max_position_notional_usd ({r.max_position_notional_usd}) exceeds "
+                    f"equity x leverage ({r.equity_usd * r.max_leverage})"
+                )
             self.account.load_secret()  # fail at boot, not at the first order
 
         if self.mode in (Mode.LIVE, Mode.PAPER) and self.data.max_staleness_ms > 30_000:

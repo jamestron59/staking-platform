@@ -1,0 +1,43 @@
+[Unit]
+Description=hlq market data recorder (Phase 0)
+Documentation=https://github.com/jamestron59/staking-platform
+After=network-online.target time-sync.target
+Wants=network-online.target
+# Recording before the clock is synchronised produces timestamps that are wrong
+# in a way nothing downstream can detect, and the data is not re-collectable.
+Requires=time-sync.target
+
+[Service]
+Type=simple
+User=hlq
+Group=hlq
+WorkingDirectory=/opt/hlq
+
+# The recorder never authenticates and never needs the trading key. Giving it
+# one anyway would put a signing key in a process that has no use for it.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/hlq/venv/bin/hlq --config /etc/hlq/config.yaml record
+
+Restart=always
+RestartSec=10
+
+# Losing recording time is losing data permanently, so this restarts forever
+# rather than giving up after a burst.
+StartLimitIntervalSec=0
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/hlq /var/log/hlq
+
+[Install]
+WantedBy=multi-user.target

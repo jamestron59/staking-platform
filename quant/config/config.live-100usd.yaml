@@ -1,0 +1,110 @@
+# Live profile: $100 account, no subaccount, main account + agent wallet.
+#
+# This is a PLUMBING TEST budget, not a trading budget. At this size the
+# variance of any result dwarfs its mean — you are testing whether reconnects,
+# partial fills, reconciliation and kill switches work against the real
+# exchange, not whether a strategy makes money. Read `hlq preflight` output
+# before the first run; it states the arithmetic this file implies.
+
+mode: live
+
+network:
+  testnet: false
+
+account:
+  # Your MAIN account address (no subaccount available on a new account).
+  account_address: "0xREPLACE_WITH_YOUR_ADDRESS"
+  subaccount_address: ""
+
+  # The agent (API) wallet key. Approve one with exchange.approve_agent().
+  # It can trade but CANNOT withdraw — with no subaccount boundary, this is the
+  # main thing standing between a compromised host and your balance.
+  private_key_env: "HL_API_SECRET"
+  require_agent_wallet: true
+
+  # Acknowledges that without a subaccount, exposure is bounded only by this
+  # config. The substitute for an account boundary: keep ONLY your risk capital
+  # in the HL account and the rest off-exchange.
+  no_subaccount_acknowledged: true
+
+data:
+  coins: ["BTC"]              # one coin until the plumbing is proven
+  candle_intervals: ["1m", "5m"]
+  subscribe_book: true
+  subscribe_trades: true
+  subscribe_asset_ctx: true
+  subscribe_bbo: false
+  root: "/var/lib/hlq/data"
+  rotate_minutes: 60
+  max_staleness_ms: 5000
+  ws_ping_interval_s: 20
+  ws_reconnect_max_backoff_s: 60
+
+costs:
+  # REPLACE with your real tier from info.user_fees(address). A new account
+  # pays the base tier, which is what these defaults assume.
+  taker_fee_bps: 4.5
+  maker_fee_bps: 1.5
+  # Replace with the measured value once `hlq status` reports one. Until then
+  # this is a guess about your VPS's latency, not a fact.
+  residual_slippage_bps: 1.5
+  funding_interval_hours: 1.0
+
+risk:
+  equity_usd: 100.0
+  risk_per_trade_pct: 0.5        # $0.50 per trade at the stop
+
+  # At $100, the position cap binds long before the risk rule does: for any
+  # stop tighter than 1.25% the size comes from the $40 cap, so actual risk is
+  # well under 0.5%. That is intentional at this stage.
+  max_position_notional_usd: 40.0
+  max_gross_notional_usd: 60.0
+  max_portfolio_risk_pct: 1.0
+  assumed_correlation: 0.8
+  max_leverage: 1.0              # no leverage while testing plumbing
+  max_concurrent_positions: 1
+
+  max_daily_loss_pct: 3.0        # $3 — about 6 full-risk trades
+  max_drawdown_pct: 6.0
+  max_consecutive_losses: 4
+  max_reject_rate: 0.25
+  reject_window: 20
+  min_liquidation_buffer_mult: 3.0
+
+  min_edge_after_costs_bps: 2.0
+  max_spread_bps: 3.0
+  min_depth_usd_at_10bps: 25000.0
+
+execution:
+  prefer_maker: true             # maker vs taker is 3bps here; it matters
+  maker_timeout_ms: 3000
+  max_requotes: 3
+  max_participation_of_depth: 0.10
+  slice_interval_ms: 750
+  max_slices: 3                  # $40 never needs slicing on BTC
+  ioc_slippage_bps: 5.0
+  dead_man_switch_s: 60
+  dead_man_refresh_s: 20
+  action_expiry_ms: 10000
+  reconcile_interval_s: 15
+  order_timeout_ms: 8000
+
+model:
+  horizon_ms: 300000
+  profit_take_atr_mult: 1.5
+  stop_atr_mult: 1.0
+  embargo_pct: 0.01
+  n_splits: 6
+  min_train_samples: 5000
+  min_oos_sharpe: 1.0
+  max_calibration_brier: 0.24
+  min_challenger_improvement: 0.15
+  shadow_period_hours: 72
+
+alerts:
+  enabled: false
+
+log_dir: "/var/log/hlq"
+state_dir: "/var/lib/hlq/state"
+
+i_understand_this_trades_real_money: true
